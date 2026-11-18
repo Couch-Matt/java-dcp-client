@@ -24,6 +24,8 @@ jobs:
             8
             17
           cache: 'maven'
+          
+      - uses: docker/setup-docker-action@v5.7.0
 
       - name: run package tests
         run: ./mvnw clean package
