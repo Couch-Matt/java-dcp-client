@@ -63,7 +63,7 @@ public class ClusterSupplier implements Supplier<Cluster>, Closeable {
                     // Accommodate slow CI docker environment
                     .timeoutConfig(it -> it
                         .kvTimeout(Duration.ofSeconds(30))
-                        .connectTimeout(Duration.ofSeconds(45))
+                        .connectTimeout(Duration.ofSeconds(10)) // must be < kvTimeout so a stuck reconnect gets retried
                     )
                 )
         );
