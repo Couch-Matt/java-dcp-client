@@ -318,7 +318,7 @@ public class CouchbaseContainer extends GenericContainer<CouchbaseContainer> {
 
   public void restart() {
     // -w 45 == wait 45 seconds for restart, for slow CI environments
-    execOrDie(this, "sv -w 45 restart couchbase-server");
+    execOrDie(this, "sv -w 45 restart /etc/service/couchbase-server");
     waitForReadyState();
   }
 
