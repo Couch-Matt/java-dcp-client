@@ -16,6 +16,10 @@
 
 package com.couchbase.client.dcp.test.agent;
 
+import com.couchbase.client.core.error.CollectionExistsException;
+import com.couchbase.client.core.error.RequestCanceledException;
+import com.couchbase.client.core.error.ScopeExistsException;
+import com.couchbase.client.core.retry.RetryReason;
 import com.couchbase.client.core.util.ConsistencyUtil;
 import com.couchbase.client.java.Cluster;
 import com.couchbase.client.java.manager.collection.CollectionManager;
@@ -65,7 +69,9 @@ public class CollectionServiceImpl implements CollectionService {
   @Override
   public void createScopes(List<String> scopes, String bucket) {
     CollectionManager collectionManager = collectionManager(bucket);
-    scopes.forEach(collectionManager::createScope);
+    scopes.forEach(scopeName ->
+        retryOnChannelClosed(() -> collectionManager.createScope(scopeName), ScopeExistsException.class)
+    );
     scopes.forEach(scopeName ->
         ConsistencyUtil.waitUntilScopePresent(clusterSupplier.get().core(), bucket, scopeName)
     );
@@ -76,7 +82,7 @@ public class CollectionServiceImpl implements CollectionService {
     CollectionManager collectionManager = collectionManager(bucket);
     collections.forEach(collectionName -> {
       CollectionSpec collectionSpec = CollectionSpec.create(collectionName, scope);
-      collectionManager.createCollection(collectionSpec);
+      retryOnChannelClosed(() -> collectionManager.createCollection(collectionSpec), CollectionExistsException.class);
     });
 
     collections.forEach(collectionName ->
@@ -101,6 +107,35 @@ public class CollectionServiceImpl implements CollectionService {
     collections.forEach(collectionName ->
         ConsistencyUtil.waitUntilCollectionDropped(clusterSupplier.get().core(), bucket, scope, collectionName)
     );
+  }
+
+  /**
+   * Runs a non-idempotent management request, retrying if the HTTP connection is closed mid-request.
+   * The SDK does not retry these itself, and in CI the management connection is occasionally dropped
+   * just after a bucket is created. If the first attempt actually reached the server, a retry fails
+   * with {@code alreadyDone}, which is treated as success.
+   */
+  private static void retryOnChannelClosed(Runnable op, Class<? extends RuntimeException> alreadyDone) {
+    final int maxAttempts = 3;
+    for (int attempt = 1; ; attempt++) {
+      try {
+        op.run();
+        return;
+      } catch (RequestCanceledException e) {
+        boolean channelClosed = e.reason().innerReason() == RetryReason.CHANNEL_CLOSED_WHILE_IN_FLIGHT;
+        if (!channelClosed || attempt >= maxAttempts) {
+          throw e;
+        }
+        log.warn("Management request failed because the channel closed while in flight; retrying (attempt {} of {})",
+            attempt + 1, maxAttempts, e);
+      } catch (RuntimeException e) {
+        if (attempt > 1 && alreadyDone.isInstance(e)) {
+          log.info("Management request succeeded on an earlier attempt: {}", e.toString());
+          return;
+        }
+        throw e;
+      }
+    }
   }
 
   private static List<String> generateIds(String prefix, int numberToGenerate) {
