@@ -41,6 +41,14 @@ jobs:
       - name: run package tests
         run: ./mvnw clean package --batch-mode --no-transfer-progress -Dmaven.javadoc.skip=true -Djvm=${JAVA_HOME_8_X64}/bin/java
 
+      - name: Check ResourceLeakDetector results
+        run: |
+          if grep "LEAK:" target/surefire-reports/*.xml > leaks.txt; then
+            cat leaks.txt
+            echo "Memory leak detected; see task summary for details" >> $GITHUB_STEP_SUMMARY
+            false
+          fi
+
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
